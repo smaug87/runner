@@ -775,7 +775,19 @@ namespace GitHub.Runner.Worker
                 // make sure we get a clean folder ready to use.
                 IOUtil.DeleteDirectory(destDirectory, executionContext.CancellationToken);
                 Directory.CreateDirectory(destDirectory);
-                executionContext.Output($"Download action repository '{downloadInfo.NameWithOwner}@{downloadInfo.Ref}' (SHA:{downloadInfo.ResolvedSha})");
+
+                if (downloadInfo.PackageDetails != null) 
+                {
+                    executionContext.Output($"##[group]Download immutable action package '{downloadInfo.NameWithOwner}@{downloadInfo.Ref}'");
+                    executionContext.Output($"Version: {downloadInfo.PackageDetails.Version}");
+                    executionContext.Output($"Digest: {downloadInfo.PackageDetails.ManifestDigest}");
+                    executionContext.Output($"Source commit SHA: {downloadInfo.ResolvedSha}");
+                    executionContext.Output("##[endgroup]");
+                } 
+                else 
+                {
+                    executionContext.Output($"Download action repository '{downloadInfo.NameWithOwner}@{downloadInfo.Ref}' (SHA:{downloadInfo.ResolvedSha})");
+                }
             }
 
             //download and extract action in a temp folder and rename it on success
@@ -1102,6 +1114,7 @@ namespace GitHub.Runner.Worker
             int timeoutSeconds = 20 * 60;
             while (retryCount < 3)
             {
+                string requestId = string.Empty;
                 using (var actionDownloadTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
                 using (var actionDownloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(actionDownloadTimeout.Token, executionContext.CancellationToken))
                 {
@@ -1117,7 +1130,7 @@ namespace GitHub.Runner.Worker
                             httpClient.DefaultRequestHeaders.UserAgent.AddRange(HostContext.UserAgents);
                             using (var response = await httpClient.GetAsync(downloadUrl))
                             {
-                                var requestId = UrlUtil.GetGitHubRequestId(response.Headers);
+                                requestId = UrlUtil.GetGitHubRequestId(response.Headers);
                                 if (!string.IsNullOrEmpty(requestId))
                                 {
                                     Trace.Info($"Request URL: {downloadUrl} X-GitHub-Request-Id: {requestId} Http Status: {response.StatusCode}");
@@ -1155,7 +1168,7 @@ namespace GitHub.Runner.Worker
                     catch (OperationCanceledException ex) when (!executionContext.CancellationToken.IsCancellationRequested && retryCount >= 2)
                     {
                         Trace.Info($"Action download final retry timeout after {timeoutSeconds} seconds.");
-                        throw new TimeoutException($"Action '{downloadUrl}' download has timed out. Error: {ex.Message}");
+                        throw new TimeoutException($"Action '{downloadUrl}' download has timed out. Error: {ex.Message} {requestId}");
                     }
                     catch (ActionNotFoundException)
                     {
@@ -1170,11 +1183,11 @@ namespace GitHub.Runner.Worker
                         if (actionDownloadTimeout.Token.IsCancellationRequested)
                         {
                             // action download didn't finish within timeout
-                            executionContext.Warning($"Action '{downloadUrl}' didn't finish download within {timeoutSeconds} seconds.");
+                            executionContext.Warning($"Action '{downloadUrl}' didn't finish download within {timeoutSeconds} seconds. {requestId}");
                         }
                         else
                         {
-                            executionContext.Warning($"Failed to download action '{downloadUrl}'. Error: {ex.Message}");
+                            executionContext.Warning($"Failed to download action '{downloadUrl}'. Error: {ex.Message} {requestId}");
                         }
                     }
                 }
